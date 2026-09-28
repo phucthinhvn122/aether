@@ -1,0 +1,61 @@
+name: iOS build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths-ignore: ['**.md']
+
+jobs:
+  build-ios:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Select newest Xcode 26
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE"; fi
+          xcodebuild -version
+
+      - name: Install and build web app
+        run: |
+          npm ci
+          npm run build
+          npx cap sync ios
+
+      - name: Build for iOS Simulator
+        working-directory: ios/App
+        run: |
+          xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/sim CODE_SIGNING_ALLOWED=NO build
+          cd build/sim/Build/Products/Debug-iphonesimulator
+          zip -qry "$GITHUB_WORKSPACE/Aether-simulator.zip" App.app
+
+      - name: Build unsigned device IPA
+        working-directory: ios/App
+        run: |
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/device \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          mkdir -p Payload
+          cp -R build/device/Build/Products/Release-iphoneos/App.app Payload/
+          zip -qry "$GITHUB_WORKSPACE/Aether-unsigned.ipa" Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Aether-ios-simulator
+          path: Aether-simulator.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Aether-ios-unsigned-ipa
+          path: Aether-unsigned.ipa
