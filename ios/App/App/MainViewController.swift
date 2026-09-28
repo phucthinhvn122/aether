@@ -3,5 +3,6 @@ import Capacitor
 class MainViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(NativeHttpStreamPlugin())
+        bridge?.registerPluginInstance(NativeSharePlugin())
     }
 }

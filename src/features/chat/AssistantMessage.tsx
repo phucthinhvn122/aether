@@ -13,6 +13,7 @@ import { Markdown } from '../markdown/Markdown';
 import { ErrorNotice } from './ErrorNotice';
 import type { StreamPhase } from './streamStore';
 import { ThinkingBlock } from './ThinkingBlock';
+import { ToolSteps } from './ToolSteps';
 
 interface AssistantMessageProps {
   message: Message;
@@ -48,7 +49,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   return (
     <div className="group flex flex-col">
       {message.thinking && <ThinkingBlock text={message.thinking} active={phase === 'thinking'} />}
-      {streaming && !message.content && !message.thinking && <TypingDots />}
+      {message.steps && message.steps.length > 0 && <ToolSteps steps={message.steps} active={phase === 'tools'} />}
+      {streaming && !message.content && !message.thinking && !message.steps?.length && <TypingDots />}
 
       {segments.map((seg, i) => {
         const last = i === segments.length - 1;

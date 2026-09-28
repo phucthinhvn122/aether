@@ -1,16 +1,79 @@
-import { ChevronLeft, ChevronRight, Download, X } from 'lucide-react';
-import { useEffect } from 'react';
+import { ChevronLeft, ChevronRight, Download, FileCode, FileText, LoaderCircle, Presentation, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { CopyButton } from '../../components/CopyButton';
 import { IconButton } from '../../components/IconButton';
 import { cn } from '../../lib/cn';
-import { downloadText, safeFilename } from '../../lib/download';
 import { strings } from '../../lib/strings';
 import { ArtifactPreview } from './ArtifactPreview';
 import { artifactStore, closeArtifact, setArtifactTab, setArtifactVersion, type ArtifactTab } from './artifactStore';
-import { artifactExtension } from './parse';
+import type { ArtifactVersion } from './types';
+import { exportKinds, exportLabel, useExport, type ExportKind } from './useExport';
 import type { ArtifactIndex } from './useArtifacts';
 
-const MIME = { html: 'text/html', markdown: 'text/markdown', code: 'text/plain' } as const;
+const KIND_ICONS = { pdf: FileText, pptx: Presentation, source: FileCode } as const;
+
+function ExportMenu({ artifact }: { artifact: ArtifactVersion }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const { busy, error, run, clearError } = useExport();
+  const kinds = exportKinds(artifact);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [open]);
+
+  const pick = (kind: ExportKind) => {
+    setOpen(false);
+    void run(kind, artifact);
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <IconButton
+        label={busy ? strings.artifacts.exporting : strings.artifacts.export}
+        size="sm"
+        disabled={!artifact.complete || busy !== null}
+        active={open}
+        onClick={() => {
+          clearError();
+          if (kinds.length === 1) pick(kinds[0]);
+          else setOpen((v) => !v);
+        }}
+      >
+        {busy ? <LoaderCircle className="size-4 animate-spin" aria-hidden /> : <Download className="size-4" aria-hidden />}
+      </IconButton>
+      {open && (
+        <div role="menu" className="absolute top-full right-0 z-20 mt-1 w-56 rounded-xl border border-line bg-surface p-1 shadow-xl animate-fade-in">
+          {kinds.map((kind) => {
+            const Icon = KIND_ICONS[kind];
+            return (
+              <button
+                key={kind}
+                type="button"
+                role="menuitem"
+                onClick={() => pick(kind)}
+                className="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm text-ink hover:bg-muted lg:min-h-9"
+              >
+                <Icon className="size-4 shrink-0 text-ink-soft" aria-hidden />
+                {exportLabel(kind, artifact)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {error && (
+        <div role="alert" className="absolute top-full right-0 z-20 mt-1 w-64 rounded-xl bg-danger-soft p-3 text-xs text-danger shadow-lg">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface ArtifactPanelProps {
   index: ArtifactIndex;
@@ -71,15 +134,7 @@ export function ArtifactPanel({ index, sheet }: ArtifactPanelProps) {
             </>
           )}
           <CopyButton text={artifact.content} />
-          <IconButton
-            label={strings.common.download}
-            size="sm"
-            onClick={() =>
-              downloadText(`${safeFilename(artifact.title)}.${artifactExtension(artifact)}`, artifact.content, MIME[artifact.type])
-            }
-          >
-            <Download className="size-4" aria-hidden />
-          </IconButton>
+          <ExportMenu artifact={artifact} />
           <IconButton label={strings.artifacts.close} size="sm" onClick={closeArtifact}>
             <X className="size-4" aria-hidden />
           </IconButton>

@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS: Settings = {
   modelCache: [],
   modelCacheBaseUrl: '',
   reasoningEffort: 'auto',
+  webSearch: true,
 };
 
 const MAX_RECENT_MODELS = 6;

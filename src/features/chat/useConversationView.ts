@@ -30,8 +30,12 @@ export function useConversationView(conversationId: string | undefined) {
   const messages = useMemo(() => {
     const list = stored ?? NO_MESSAGES;
     if (!liveHere) return list;
-    return list.map((m) => (m.id === stream.messageId ? { ...m, content: stream.content, thinking: stream.thinking || undefined } : m));
-  }, [stored, liveHere, stream.messageId, stream.content, stream.thinking]);
+    return list.map((m) =>
+      m.id === stream.messageId
+        ? { ...m, content: stream.content, thinking: stream.thinking || undefined, steps: stream.steps.length ? stream.steps : m.steps }
+        : m,
+    );
+  }, [stored, liveHere, stream.messageId, stream.content, stream.thinking, stream.steps]);
 
   const artifacts = useArtifactIndex(messages);
 

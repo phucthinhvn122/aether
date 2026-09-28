@@ -30,6 +30,8 @@ export interface Settings {
   modelCacheBaseUrl: string;
   /** "auto" sends nothing; otherwise sent as reasoning_effort (OpenRouter: reasoning.effort). */
   reasoningEffort: ReasoningEffort;
+  /** Offer web_search / fetch_url tools to the model (tool calling). */
+  webSearch: boolean;
 }
 
 export type ReasoningEffort = 'auto' | 'low' | 'medium' | 'high';
@@ -44,12 +46,29 @@ export interface Conversation {
   updatedAt: number;
 }
 
+export interface ToolSource {
+  title: string;
+  url: string;
+}
+
+/** One tool invocation made while answering (web search, page fetch). */
+export interface ToolStep {
+  id: string;
+  kind: 'search' | 'fetch';
+  /** The search query or URL. */
+  label: string;
+  status: 'running' | 'done' | 'error';
+  sources?: ToolSource[];
+  error?: string;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
   role: Role;
   content: string;
   thinking?: string;
+  steps?: ToolStep[];
   attachments?: Attachment[];
   error?: string;
   model?: string;

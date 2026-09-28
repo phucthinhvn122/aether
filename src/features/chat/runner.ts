@@ -1,17 +1,24 @@
 import { db, getConversationMessages, getSettings } from '../../lib/db';
 import { uid } from '../../lib/id';
-import { ApiError, reasoningParams, streamChat, type ChatMessage } from '../../lib/openai';
+import { ApiError, reasoningParams, streamChat, type ChatMessage, type ToolCall } from '../../lib/openai';
 import { strings } from '../../lib/strings';
-import type { Attachment, Message } from '../../lib/types';
+import type { Attachment, Message, ToolStep } from '../../lib/types';
 import { autoTitle } from './autoTitle';
 import { buildSystemPrompt, hasImageParts, projectImages, toApiMessages } from './buildPrompt';
 import { IDLE_STREAM, streamStore } from './streamStore';
 import { splitInlineThinking } from './thinkTags';
+import { runTool, stepFor, WEB_TOOLS } from './webTools';
 
 let activeController: AbortController | null = null;
 
 const PERSIST_EVERY_MS = 1000;
 const IMAGE_REJECTION_KINDS = new Set(['badRequest', 'model', 'server']);
+// OpenRouter answers 404 "No endpoints found that support tool use"; others send 400/422/500.
+const TOOL_REJECTION_KINDS = new Set(['badRequest', 'model', 'server', 'notFound']);
+const MAX_TOOL_ROUNDS = 5;
+
+/** Models that rejected the `tools` field this session; they are asked without tools from then on. */
+const toollessModels = new Set<string>();
 
 export function stopGeneration(): void {
   activeController?.abort();
@@ -74,7 +81,8 @@ async function buildRequest(conversationId: string, history: Message[]) {
   const project = conversation?.projectId ? await db.projects.get(conversation.projectId) : undefined;
   const files = project ? await db.projectFiles.where('projectId').equals(project.id).toArray() : [];
   const query = [...history].reverse().find((m) => m.role === 'user')?.content ?? '';
-  const system = buildSystemPrompt({ settings, project, files, query });
+  const webTools = settings.webSearch && !toollessModels.has(settings.model);
+  const system = buildSystemPrompt({ settings, project, files, query, webTools });
   const images = settings.vision ? projectImages(files, query) : [];
   const withVision = toApiMessages({ system, history, vision: settings.vision, projectImages: images });
   const textOnly = () => toApiMessages({ system, history, vision: false });
@@ -103,47 +111,97 @@ export async function runAssistant(conversationId: string): Promise<void> {
 
   let raw = '';
   let reasoning = '';
+  let steps: ToolStep[] = [];
   let frame = 0;
   let lastPersist = Date.now();
 
   const derived = () => {
     const inline = splitInlineThinking(raw);
-    return { content: inline.content, thinking: [reasoning, inline.thinking].filter(Boolean).join('\n\n') };
+    return {
+      content: inline.content,
+      thinking: [reasoning, inline.thinking].filter(Boolean).join('\n\n'),
+      steps: steps.length ? steps : undefined,
+    };
   };
   const flush = () => {
     frame = 0;
     if (activeController !== controller) return;
     const d = derived();
-    streamStore.set({ content: d.content, thinking: d.thinking, phase: d.content ? 'answering' : d.thinking ? 'thinking' : 'waiting' });
+    const toolsRunning = steps.some((s) => s.status === 'running');
+    streamStore.set({
+      content: d.content,
+      thinking: d.thinking,
+      steps,
+      phase: toolsRunning ? 'tools' : d.content ? 'answering' : d.thinking ? 'thinking' : 'waiting',
+    });
+  };
+  const schedule = () => {
+    if (!frame) frame = requestAnimationFrame(flush);
   };
 
-  const consume = async (payload: ChatMessage[]) => {
+  const consume = async (payload: ChatMessage[], withTools: boolean): Promise<ToolCall[]> => {
     const request = {
       model: settings.model,
       messages: payload,
       signal: controller.signal,
+      tools: withTools ? WEB_TOOLS : undefined,
       extraBody: reasoningParams(settings.baseUrl, settings.reasoningEffort),
     };
+    let calls: ToolCall[] = [];
     for await (const event of streamChat(settings, request)) {
       if (event.type === 'content') raw += event.text;
-      else reasoning += event.text;
-      if (!frame) frame = requestAnimationFrame(flush);
+      else if (event.type === 'thinking') reasoning += event.text;
+      else calls = event.calls;
+      schedule();
       if (Date.now() - lastPersist > PERSIST_EVERY_MS) {
         lastPersist = Date.now();
         void db.messages.update(assistantId, derived());
       }
     }
+    return calls;
+  };
+
+  let base = messages;
+  const turns: ChatMessage[] = [];
+
+  /** One model call, retried without tools / without images when the provider rejects them before streaming anything. */
+  const attempt = async (withTools: boolean): Promise<ToolCall[]> => {
+    const before = raw.length + reasoning.length;
+    try {
+      return await consume([...base, ...turns], withTools);
+    } catch (err) {
+      if (!(err instanceof ApiError) || raw.length + reasoning.length > before) throw err;
+      if (withTools && TOOL_REJECTION_KINDS.has(err.kind)) {
+        toollessModels.add(settings.model);
+        return attempt(false);
+      }
+      if (IMAGE_REJECTION_KINDS.has(err.kind) && hasImageParts(base)) {
+        base = textOnly();
+        return attempt(withTools);
+      }
+      throw err;
+    }
   };
 
   let error: string | undefined;
   try {
-    try {
-      await consume(messages);
-    } catch (err) {
-      const rejectedImages =
-        err instanceof ApiError && IMAGE_REJECTION_KINDS.has(err.kind) && hasImageParts(messages) && !raw && !reasoning;
-      if (!rejectedImages) throw err;
-      await consume(textOnly());
+    for (let round = 0; ; round++) {
+      const withTools = settings.webSearch && !toollessModels.has(settings.model) && round < MAX_TOOL_ROUNDS;
+      const roundStart = raw.length;
+      const calls = await attempt(withTools);
+      if (!calls.length || !withTools) break;
+
+      turns.push({ role: 'assistant', content: raw.slice(roundStart) || null, tool_calls: calls });
+      steps = [...steps, ...calls.map(stepFor)];
+      schedule();
+      for (const call of calls) {
+        const { output, step } = await runTool(call, controller.signal);
+        steps = steps.map((s) => (s.id === step.id ? step : s));
+        turns.push({ role: 'tool', tool_call_id: call.id, content: output });
+        schedule();
+      }
+      void db.messages.update(assistantId, derived());
+      if (raw && !raw.endsWith('\n')) raw += '\n\n';
     }
   } catch (err) {
     if (err instanceof ApiError && err.kind === 'aborted') {

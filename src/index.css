@@ -231,6 +231,95 @@
   animation: var(--animate-caret);
 }
 
+/* ---------- Slides and PDF pages: always light, whatever the app theme ---------- */
+.paper-theme {
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-muted: #f3efe9;
+  --color-ink: #1a1614;
+  --color-ink-soft: #5b534d;
+  --color-ink-faint: #8c837b;
+  --color-line: #e5dfd6;
+  --color-accent: #c45c26;
+  --color-accent-strong: #a84b1c;
+  --color-accent-soft: #f6e5da;
+  --color-code: #f4f1ec;
+  background: #ffffff;
+  color: var(--color-ink);
+  color-scheme: light;
+}
+.paper-theme button {
+  display: none;
+}
+.slide {
+  position: relative;
+  width: 960px;
+  height: 540px;
+  overflow: hidden;
+  font-family: var(--font-sans);
+}
+.slide-accent {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 10px;
+  background: var(--color-accent);
+}
+.slide-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 48px 64px 44px 72px;
+}
+.slide-title {
+  font-family: var(--font-serif);
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--color-ink);
+}
+.slide-rule {
+  flex: none;
+  width: 64px;
+  height: 4px;
+  margin-top: 16px;
+  border-radius: 2px;
+  background: var(--color-accent);
+}
+.slide-body {
+  flex: 1;
+  min-height: 0;
+  margin-top: 22px;
+  overflow: hidden;
+}
+.slide-body .prose-aether {
+  font-family: var(--font-sans);
+  font-size: 1em;
+  line-height: 1.45;
+}
+.slide-cover .slide-content {
+  justify-content: center;
+  padding: 64px 96px;
+}
+.slide-cover .slide-title {
+  font-size: 56px;
+}
+.slide-cover .slide-body {
+  flex: none;
+  color: var(--color-ink-soft);
+}
+.slide-number {
+  position: absolute;
+  right: 28px;
+  bottom: 18px;
+  font-size: 14px;
+  color: var(--color-ink-faint);
+}
+.pdf-page {
+  width: 794px;
+  padding: 64px 72px;
+}
+
 /* ---------- highlight.js (warm palette, adapts to dark) ---------- */
 .hljs { color: var(--color-ink); background: transparent; }
 .hljs-comment, .hljs-quote { color: #8c837b; font-style: italic; }

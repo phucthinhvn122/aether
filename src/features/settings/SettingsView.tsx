@@ -176,6 +176,12 @@ export function SettingsView() {
                   checked={draft.vision}
                   onChange={(vision) => update({ vision })}
                 />
+                <Toggle
+                  label={strings.settings.webSearch}
+                  hint={strings.settings.webSearchHint}
+                  checked={draft.webSearch}
+                  onChange={(webSearch) => update({ webSearch })}
+                />
 
                 <ConnectionTest endpoint={endpoint} model={draft.model} />
               </Section>

@@ -4,11 +4,12 @@ import { strings } from '../../lib/strings';
 import { HighlightedCode } from '../markdown/CodeBlock';
 import { Markdown } from '../markdown/Markdown';
 import type { ArtifactTab } from './artifactStore';
+import { SlidesPreview } from './SlidesPreview';
 import type { ArtifactVersion } from './types';
 
 function codeLanguage(a: ArtifactVersion): string | undefined {
   if (a.type === 'html') return 'xml';
-  if (a.type === 'markdown') return 'markdown';
+  if (a.type === 'markdown' || a.type === 'slides') return 'markdown';
   return a.language;
 }
 
@@ -42,6 +43,8 @@ export function ArtifactPreview({ artifact, tab }: { artifact: ArtifactVersion; 
       />
     );
   }
+
+  if (artifact.type === 'slides') return <SlidesPreview content={content} />;
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-6 sm:px-8">

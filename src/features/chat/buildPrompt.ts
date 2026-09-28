@@ -9,9 +9,9 @@ Core rules:
 - Format answers with Markdown. Use fenced code blocks with a language tag for code.
 
 Artifacts:
-If you create a substantial standalone deliverable (a complete HTML page or app, a long markdown document, or a full code file), wrap it exactly like this:
+If you create a substantial standalone deliverable (a complete HTML page or app, a long markdown document, a slide deck, or a full code file), wrap it exactly like this:
 
-:::artifact id="unique-kebab-id" title="Short Title" type="html|markdown|code" language="tsx"
+:::artifact id="unique-kebab-id" title="Short Title" type="html|markdown|slides|code" language="tsx"
 ...full content...
 :::
 
@@ -21,7 +21,20 @@ Artifact rules:
 - type="html" must be one self-contained HTML document (inline CSS and JS; CDN scripts are fine).
 - The language attribute is only needed for type="code".
 - When the user asks to change an existing artifact, output the complete updated artifact again with the SAME id.
-- Keep short snippets, explanations and answers outside artifacts. Add a brief note outside the block describing it.`;
+- Keep short snippets, explanations and answers outside artifacts. Add a brief note outside the block describing it.
+
+Files (PDF, PowerPoint):
+This app turns artifacts into real files with a download button. Never say you cannot create files — create the artifact.
+- PDF (report, CV, letter, handout…): a type="markdown" artifact with format="pdf" (or type="html" with format="pdf" when a custom visual layout is needed; design it for an A4 page 794px wide).
+- Slides / presentation / PowerPoint: a type="slides" artifact. The user gets .pptx and PDF downloads.
+  Slides format: markdown, one slide per section, slides separated by a line containing only ---.
+  Start each slide with "# Slide title". The first slide is a cover: title plus one subtitle line.
+  Use short bullet points (3–6 per slide, nested with two spaces), small tables when useful, and "Note: …" lines for speaker notes.
+  Do not use images or HTML inside slides.`;
+
+const WEB_RULES = `Web access:
+You can call web_search to look things up and fetch_url to read a page. Use them for current events, prices, recent releases, facts you are unsure about, or when the user asks you to search.
+Search in the language that gives the best results, read the most relevant pages when snippets are not enough, then answer in the user's language and cite sources as markdown links.`;
 
 export const KNOWLEDGE_CHAR_CAP = 80_000;
 const PER_FILE_CAP = 30_000;
@@ -79,10 +92,13 @@ interface SystemPromptInput {
   project?: Project;
   files: ProjectFile[];
   query: string;
+  /** The request will offer web_search / fetch_url. */
+  webTools?: boolean;
 }
 
-export function buildSystemPrompt({ settings, project, files, query }: SystemPromptInput): string {
+export function buildSystemPrompt({ settings, project, files, query, webTools }: SystemPromptInput): string {
   const sections = [TECHNICAL_RULES, `Current date: ${new Date().toDateString()}.`];
+  if (webTools) sections.push(WEB_RULES);
   if (settings.instructions.trim()) {
     sections.push(`User's custom instructions:\n${settings.instructions.trim()}`);
   }

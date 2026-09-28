@@ -111,6 +111,9 @@ export const strings = {
       'Auto sends nothing. Low / Medium / High send reasoning_effort (OpenRouter: reasoning.effort) — only for reasoning models.',
     vision: 'Send images to the model',
     visionHint: 'Attach images as image_url parts (vision models). Falls back to text automatically if rejected.',
+    webSearch: 'Web search',
+    webSearchHint:
+      'Lets the model call web_search / fetch_url (DuckDuckGo, no key needed). Needs a model with tool calling; others are asked again without tools automatically.',
     instructions: 'Custom instructions',
     instructionsHint: 'Applied to every conversation. Project instructions are added on top.',
     instructionsPlaceholder: 'e.g. Be concise. I prefer TypeScript examples.',
@@ -135,6 +138,7 @@ export const strings = {
     empty: 'No models listed. Type a model id above.',
     effort: 'Thinking',
     efforts: { auto: 'Auto', low: 'Low', medium: 'Medium', high: 'High' },
+    webSearch: 'Web search',
     manage: 'Model settings',
   },
   projects: {
@@ -162,6 +166,15 @@ export const strings = {
     imageFile: 'Image',
     none: 'No project',
   },
+  tools: {
+    searchingWeb: 'Searching the web',
+    searching: 'Searching',
+    searched: 'Searched',
+    reading: 'Reading',
+    read: 'Read',
+    summary: (steps: number, sources: number) =>
+      `Used the web · ${steps} step${steps === 1 ? '' : 's'}${sources ? ` · ${sources} source${sources === 1 ? '' : 's'}` : ''}`,
+  },
   artifacts: {
     preview: 'Preview',
     code: 'Code',
@@ -172,8 +185,16 @@ export const strings = {
     open: 'Open artifact',
     close: 'Close artifact',
     clickToOpen: 'Click to open',
-    defaultTitle: { html: 'Web page', markdown: 'Document', code: 'Code' },
-    typeLabel: { html: 'HTML', markdown: 'Document', code: 'Code' },
+    defaultTitle: { html: 'Web page', markdown: 'Document', code: 'Code', slides: 'Presentation' },
+    typeLabel: { html: 'HTML', markdown: 'Document', code: 'Code', slides: 'Slides' },
     iframeTitle: 'Artifact preview',
+    slideCount: (n: number) => `${n} slide${n === 1 ? '' : 's'}`,
+    lineCount: (n: number) => `${n} lines`,
+    export: 'Export',
+    downloadSource: (ext: string) => `Source (.${ext})`,
+    downloadPdf: 'PDF document',
+    downloadPptx: 'PowerPoint (.pptx)',
+    exporting: 'Creating file…',
+    exportFailed: 'Could not create the file',
   },
 } as const;

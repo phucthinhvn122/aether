@@ -1,12 +1,14 @@
 import { createStore } from '../../lib/store';
+import type { ToolStep } from '../../lib/types';
 
-export type StreamPhase = 'idle' | 'waiting' | 'thinking' | 'answering';
+export type StreamPhase = 'idle' | 'waiting' | 'thinking' | 'answering' | 'tools';
 
 export interface StreamState {
   conversationId: string | null;
   messageId: string | null;
   content: string;
   thinking: string;
+  steps: ToolStep[];
   phase: StreamPhase;
 }
 
@@ -15,6 +17,7 @@ export const IDLE_STREAM: StreamState = {
   messageId: null,
   content: '',
   thinking: '',
+  steps: [],
   phase: 'idle',
 };
 

@@ -1,5 +1,5 @@
 import { strings } from '../../lib/strings';
-import type { ArtifactBlock, ArtifactType, Segment } from './types';
+import type { ArtifactBlock, ArtifactType, ExportFormat, Segment } from './types';
 
 const OPEN_DIRECTIVE = /^\s*:::artifact\b(.*)$/i;
 const CLOSE_DIRECTIVE = /^\s*:::\s*$/;
@@ -46,10 +46,17 @@ function unwrapFence(body: string): string {
 }
 
 function inferType(declared: string | undefined, language: string | undefined): ArtifactType {
-  if (declared === 'html' || declared === 'markdown' || declared === 'code') return declared;
-  if (declared === 'md' || (language && MARKDOWN_LANGS.has(language))) return 'markdown';
+  if (declared === 'html' || declared === 'markdown' || declared === 'code' || declared === 'slides') return declared;
+  if (declared === 'slide' || declared === 'presentation' || declared === 'pptx' || declared === 'deck') return 'slides';
+  if (declared === 'md' || declared === 'pdf' || declared === 'document' || (language && MARKDOWN_LANGS.has(language))) return 'markdown';
   if (declared === 'svg' || (language && HTML_LANGS.has(language))) return 'html';
   return 'code';
+}
+
+function exportFormat(value: string | undefined): ExportFormat | undefined {
+  if (value === 'pdf') return 'pdf';
+  if (value === 'pptx' || value === 'ppt' || value === 'powerpoint') return 'pptx';
+  return undefined;
 }
 
 function guessTitle(type: ArtifactType, content: string, language?: string): string {
@@ -57,7 +64,7 @@ function guessTitle(type: ArtifactType, content: string, language?: string): str
     const t = /<title[^>]*>([^<]+)<\/title>/i.exec(content)?.[1] ?? /<h1[^>]*>([^<]+)<\/h1>/i.exec(content)?.[1];
     if (t?.trim()) return t.trim();
   }
-  if (type === 'markdown') {
+  if (type === 'markdown' || type === 'slides') {
     const h = /^#{1,3}\s+(.+)$/m.exec(content)?.[1];
     if (h?.trim()) return h.replace(/[*_`]/g, '').trim();
   }
@@ -129,7 +136,8 @@ export function parseSegments(content: string, messageId: string): Segment[] {
         body.push(l);
       }
       const language = attrs.language?.toLowerCase() || undefined;
-      const type = inferType(attrs.type?.toLowerCase(), language);
+      const declared = attrs.type?.toLowerCase();
+      const type = inferType(declared, language);
       const contentText = unwrapFence(body.join('\n'));
       const title = attrs.title?.trim() || guessTitle(type, contentText, language);
       pushArtifact({
@@ -137,6 +145,7 @@ export function parseSegments(content: string, messageId: string): Segment[] {
         title,
         type,
         language,
+        format: exportFormat(attrs.format?.toLowerCase() ?? declared),
         content: contentText,
         complete: closed,
       });
@@ -199,6 +208,6 @@ const EXTENSIONS: Record<string, string> = {
 
 export function artifactExtension(a: Pick<ArtifactBlock, 'type' | 'language'>): string {
   if (a.type === 'html') return 'html';
-  if (a.type === 'markdown') return 'md';
+  if (a.type === 'markdown' || a.type === 'slides') return 'md';
   return EXTENSIONS[a.language ?? ''] ?? 'txt';
 }

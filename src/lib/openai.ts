@@ -1,3 +1,4 @@
+import { uid } from './id';
 import { nativeFetch, nativeHttpAvailable } from './nativeHttp';
 import { isNativeApp, proxyAvailable } from './platform';
 import { readSseData } from './sse';
@@ -7,10 +8,21 @@ export type ContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
 
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string | ContentPart[];
+export interface ToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
 }
+
+export interface ToolSpec {
+  type: 'function';
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+}
+
+export type ChatMessage =
+  | { role: 'system' | 'user'; content: string | ContentPart[] }
+  | { role: 'assistant'; content: string | ContentPart[] | null; tool_calls?: ToolCall[] }
+  | { role: 'tool'; tool_call_id: string; content: string };
 
 export interface Endpoint {
   baseUrl: string;
@@ -43,7 +55,10 @@ export class ApiError extends Error {
   }
 }
 
-export type StreamEvent = { type: 'content'; text: string } | { type: 'thinking'; text: string };
+export type StreamEvent =
+  | { type: 'content'; text: string }
+  | { type: 'thinking'; text: string }
+  | { type: 'tool_calls'; calls: ToolCall[] };
 
 export const PROXY_PATH = './api/proxy';
 
@@ -177,11 +192,19 @@ async function toApiError(res: Response, viaProxy: boolean): Promise<ApiError> {
   }
 }
 
+interface ToolCallDelta {
+  index?: number;
+  id?: string;
+  type?: string;
+  function?: { name?: string; arguments?: string };
+}
+
 interface ChoiceDelta {
   content?: string | null;
   reasoning_content?: string | null;
   reasoning?: string | null;
   thinking?: string | null;
+  tool_calls?: ToolCallDelta[] | null;
 }
 
 interface StreamChunk {
@@ -193,12 +216,34 @@ function thinkingOf(d: ChoiceDelta | undefined): string {
   return d?.reasoning_content || d?.reasoning || d?.thinking || '';
 }
 
+/** Merges streamed tool-call fragments (keyed by index) into complete calls. */
+class ToolCallAccumulator {
+  private calls: ToolCall[] = [];
+
+  add(deltas: ToolCallDelta[]): void {
+    for (const d of deltas) {
+      const i = d.index ?? this.calls.length;
+      const call = (this.calls[i] ??= { id: '', type: 'function', function: { name: '', arguments: '' } });
+      if (d.id) call.id = d.id;
+      if (d.function?.name) call.function.name += d.function.name;
+      if (d.function?.arguments) call.function.arguments += d.function.arguments;
+    }
+  }
+
+  result(): ToolCall[] {
+    return this.calls
+      .filter((c) => c?.function.name)
+      .map((c) => ({ ...c, id: c.id || `call_${uid()}` }));
+  }
+}
+
 export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
   signal?: AbortSignal;
   temperature?: number;
   maxTokens?: number;
+  tools?: ToolSpec[];
   /** Provider-specific body fields (e.g. reasoning_effort). */
   extraBody?: Record<string, unknown>;
 }
@@ -223,9 +268,11 @@ export async function* streamChat(endpoint: Endpoint, req: ChatRequest): AsyncGe
       stream: true,
       ...(req.temperature !== undefined && { temperature: req.temperature }),
       ...(req.maxTokens !== undefined && { max_tokens: req.maxTokens }),
+      ...(req.tools?.length && { tools: req.tools }),
     },
   });
 
+  const toolCalls = new ToolCallAccumulator();
   const contentType = res.headers.get('content-type') ?? '';
   if (contentType.includes('application/json')) {
     // Some servers ignore stream:true and answer with a single JSON body.
@@ -234,6 +281,9 @@ export async function* streamChat(endpoint: Endpoint, req: ChatRequest): AsyncGe
     const thinking = thinkingOf(msg);
     if (thinking) yield { type: 'thinking', text: thinking };
     if (msg?.content) yield { type: 'content', text: msg.content };
+    if (msg?.tool_calls) toolCalls.add(msg.tool_calls);
+    const calls = toolCalls.result();
+    if (calls.length) yield { type: 'tool_calls', calls };
     return;
   }
   if (!res.body) throw new ApiError('server', strings.errors.emptyResponse);
@@ -254,12 +304,40 @@ export async function* streamChat(endpoint: Endpoint, req: ChatRequest): AsyncGe
       const thinking = thinkingOf(delta);
       if (thinking) yield { type: 'thinking', text: thinking };
       if (delta?.content) yield { type: 'content', text: delta.content };
+      if (delta?.tool_calls) toolCalls.add(delta.tool_calls);
     }
   } catch (err) {
     if (req.signal?.aborted) throw new ApiError('aborted', strings.chat.stopped);
     if (err instanceof ApiError) throw err;
     throw new ApiError('network', strings.errors.network);
   }
+  const calls = toolCalls.result();
+  if (calls.length) yield { type: 'tool_calls', calls };
+}
+
+/**
+ * GET a third-party page (search results, articles) as text. Uses URLSession in the iOS app,
+ * otherwise the same-origin relay, since such sites never send CORS headers.
+ */
+export async function fetchExternalText(url: string, signal?: AbortSignal): Promise<{ text: string; contentType: string; url: string }> {
+  const headers: Record<string, string> = { Accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5' };
+  let res: Response;
+  try {
+    if (isNativeApp() && nativeHttpAvailable()) {
+      res = await nativeFetch(url, { method: 'GET', headers, signal });
+    } else if (proxyAvailable()) {
+      res = await fetch(PROXY_PATH, { method: 'GET', headers: { ...headers, 'x-aether-target': url }, signal });
+    } else {
+      res = await fetch(url, { headers, signal });
+    }
+  } catch (err) {
+    if (signal?.aborted) throw new ApiError('aborted', strings.chat.stopped);
+    throw new ApiError('network', err instanceof Error ? err.message : String(err));
+  }
+  const contentType = res.headers.get('content-type') ?? '';
+  const text = await res.text();
+  if (!res.ok) throw new ApiError(res.status === 404 ? 'notFound' : 'server', `HTTP ${res.status}`, res.status);
+  return { text, contentType, url };
 }
 
 /** Non-streaming completion (used for auto-titles and connection tests). */
