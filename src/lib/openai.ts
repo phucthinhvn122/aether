@@ -78,22 +78,22 @@ async function request(
 
   const headers = buildHeaders(endpoint, init.body !== undefined);
   if (init.accept) headers.Accept = init.accept;
-  const viaProxy = endpoint.useProxy && proxyAvailable();
-  const url = viaProxy ? PROXY_PATH : target;
-  if (viaProxy) headers['x-aether-target'] = target;
-
   const native = isNativeApp() && nativeHttpAvailable();
-  const requestInit = {
+  let viaProxy = !native && (endpoint.useProxy || proxyRescuedCors) && proxyAvailable();
+
+  const requestInit = (proxied: boolean) => ({
     method: init.method,
-    headers,
+    headers: proxied ? { ...headers, 'x-aether-target': target } : headers,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
     signal: init.signal,
-  };
+  });
 
   let res: Response;
   try {
     // Inside the iOS app requests go through URLSession, which is not subject to CORS.
-    res = native ? await nativeFetch(url, requestInit) : await fetch(url, requestInit);
+    res = native
+      ? await nativeFetch(target, requestInit(false))
+      : await fetch(viaProxy ? PROXY_PATH : target, requestInit(viaProxy));
   } catch (err) {
     if (init.signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
       throw new ApiError('aborted', strings.chat.stopped);
@@ -104,11 +104,32 @@ async function request(
       throw new ApiError('network', `${strings.errors.networkNative}${reason ? `\n${reason}` : ''}`);
     }
     if (viaProxy) throw new ApiError('proxy', strings.errors.proxyUnavailable);
-    throw new ApiError('cors', strings.errors.cors);
+    const rescued = await tryProxy(requestInit(true));
+    if (init.signal?.aborted) throw new ApiError('aborted', strings.chat.stopped);
+    if (!rescued) throw new ApiError('cors', strings.errors.cors);
+    proxyRescuedCors = true;
+    viaProxy = true;
+    res = rescued;
   }
 
   if (!res.ok) throw await toApiError(res, viaProxy);
   return res;
+}
+
+/** Set once the same-origin relay (Vite dev server, npm run serve, or Vercel /api/proxy) rescued a CORS-blocked call. */
+let proxyRescuedCors = false;
+
+/** Retries a CORS-blocked request through the relay; null when the host has no relay (plain static hosting). */
+async function tryProxy(init: RequestInit): Promise<Response | null> {
+  if (!proxyAvailable()) return null;
+  try {
+    const res = await fetch(PROXY_PATH, init);
+    const html = (res.headers.get('content-type') ?? '').includes('text/html');
+    if (html && (res.status === 404 || res.status === 405)) return null;
+    return res;
+  } catch {
+    return null;
+  }
 }
 
 async function toApiError(res: Response, viaProxy: boolean): Promise<ApiError> {

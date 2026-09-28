@@ -76,6 +76,15 @@ Turn on **Settings → Call via proxy** to route requests through the same-origi
 - With the proxy your key passes through that server. Only run it on machines you trust, and don’t expose `npm run serve` publicly without adding authentication — it’s an open relay.
 - An HTTPS page cannot call a plain `http://` LAN server (mixed content); use the proxy or serve both over HTTPS.
 
+### Deploying the web app to Vercel
+
+`vercel.json` + `api/proxy.ts` make the hosted site work like `npm run dev`:
+
+- Static Vite build from `dist/`, plus a streaming Vercel Function at `/api/proxy` (Node runtime, `maxDuration` 300 s — the Hobby maximum; long replies beyond 5 minutes are cut off).
+- When a direct browser call is blocked by CORS, Aether automatically retries through `/api/proxy` (no need to flip the toggle).
+- The hosted proxy refuses localhost/private-network targets (Ollama/LM Studio need a local `npm run dev`) and cross-site browser use. Set `PROXY_ALLOWED_HOSTS=api.example.com,openrouter.ai` in Vercel → Settings → Environment Variables to limit which hosts it relays to — recommended, since the URL is public.
+- Deploy: import the GitHub repo at vercel.com/new (auto-deploys on every push), or run `vercel --prod` from this folder.
+
 ## Security: never commit API keys
 
 - Keys are typed into the Settings screen and stored in IndexedDB on the device. They are never written to files, logs or the repo.
