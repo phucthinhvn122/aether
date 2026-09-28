@@ -103,6 +103,11 @@ async function request(
 }
 
 async function toApiError(res: Response, viaProxy: boolean): Promise<ApiError> {
+  // Static hosts (GitHub Pages, Netlify…) answer /api/proxy with an HTML 404/405 page.
+  const htmlReply = (res.headers.get('content-type') ?? '').includes('text/html');
+  if (viaProxy && htmlReply && (res.status === 404 || res.status === 405)) {
+    return new ApiError('proxy', strings.errors.proxyUnavailable, res.status);
+  }
   let detail = '';
   try {
     const text = await res.text();

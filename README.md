@@ -135,10 +135,22 @@ Building iOS apps requires **macOS with Xcode 26+** — it cannot be done on Win
 
 ### A. GitHub Actions (works from Windows)
 
-`.github/workflows/ios.yml` builds on a `macos-26` runner on every push to `main` (or manually via *Actions → iOS build → Run workflow*) and uploads two artifacts:
+`.github/workflows/ios.yml` builds on a `macos-26` runner on every push to `main` (or manually via *Actions → iOS build → Run workflow*):
 
-- `Aether-simulator.zip` — `App.app` for the iOS Simulator (drag onto a running simulator, or `xcrun simctl install booted App.app`).
-- `Aether-unsigned.ipa` — an unsigned device build. To install on your iPhone, re-sign it with your Apple ID using a sideloading tool (e.g. Sideloadly or AltStore). Free Apple IDs get 7-day certificates.
+- **Releases → `ios-latest` → `Aether-unsigned.ipa`** — the device build as a real `.ipa` file. Sign it with your certificate (ESign, Sideloadly, Feather, AltStore…) before installing; iOS refuses unsigned apps.
+- Artifacts (GitHub zips these — unzip **once**; an `.ipa` is itself a zip, so don’t extract the `.ipa`): `Aether-ios-unsigned-ipa`, `Aether-ios-simulator` (`App.app` for `xcrun simctl install booted App.app`), and `Aether-ios-signed-ipa` when signing is configured.
+
+#### Let CI sign the IPA with your certificate
+
+Add three repository secrets (Settings → Secrets and variables → Actions), e.g. from PowerShell:
+
+```powershell
+gh secret set IOS_P12_BASE64 --body ([Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\cert.p12")))
+gh secret set IOS_MOBILEPROVISION_BASE64 --body ([Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\profile.mobileprovision")))
+gh secret set IOS_P12_PASSWORD   # prompts for the .p12 password
+```
+
+The next build runs `scripts/ios-resign.sh` and uploads `Aether-ios-signed-ipa` (kept 7 days; not published to the public release because it embeds your profile). The log shows the bundle id, profile type and expiry. Ad-hoc/development profiles only install on devices whose UDID is in the profile; App Store profiles must go through TestFlight.
 
 ```bash
 git init && git add . && git commit -m "Aether"

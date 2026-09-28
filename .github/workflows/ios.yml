@@ -6,6 +6,9 @@ on:
     branches: [main, master]
     paths-ignore: ['**.md']
 
+permissions:
+  contents: write
+
 jobs:
   build-ios:
     runs-on: macos-26
@@ -50,6 +53,25 @@ jobs:
           cp -R build/device/Build/Products/Release-iphoneos/App.app Payload/
           zip -qry "$GITHUB_WORKSPACE/Aether-unsigned.ipa" Payload
 
+      # Optional: add repository secrets IOS_P12_BASE64, IOS_P12_PASSWORD, IOS_MOBILEPROVISION_BASE64
+      # (base64 of your .p12 and .mobileprovision) to get a ready-to-install signed IPA.
+      - name: Sign IPA with your certificate
+        id: sign
+        env:
+          IOS_P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}
+          IOS_P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
+          IOS_MOBILEPROVISION_BASE64: ${{ secrets.IOS_MOBILEPROVISION_BASE64 }}
+        run: |
+          if [ -z "$IOS_P12_BASE64" ] || [ -z "$IOS_MOBILEPROVISION_BASE64" ]; then
+            echo "Signing secrets not set — skipping (unsigned IPA is still published)."
+            exit 0
+          fi
+          echo "$IOS_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          echo "$IOS_MOBILEPROVISION_BASE64" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+          bash scripts/ios-resign.sh ios/App/build/device/Build/Products/Release-iphoneos/App.app \
+            "$RUNNER_TEMP/cert.p12" "$IOS_P12_PASSWORD" "$RUNNER_TEMP/profile.mobileprovision" Aether-signed.ipa
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v4
         with:
           name: Aether-ios-simulator
@@ -59,3 +81,22 @@ jobs:
         with:
           name: Aether-ios-unsigned-ipa
           path: Aether-unsigned.ipa
+
+      # The signed IPA embeds your provisioning profile, so it is only kept as a (short-lived) artifact.
+      - if: steps.sign.outputs.signed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aether-ios-signed-ipa
+          path: Aether-signed.ipa
+          retention-days: 7
+
+      # Release assets are downloaded as-is (a real .ipa), unlike artifacts which GitHub wraps in a .zip.
+      - name: Publish unsigned IPA to the "ios-latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ios-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create ios-latest Aether-unsigned.ipa \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Aether iOS — latest build" \
+            --notes "Unsigned IPA from commit ${GITHUB_SHA::7}. Sign it with your certificate (ESign, Sideloadly, Feather…) before installing."
