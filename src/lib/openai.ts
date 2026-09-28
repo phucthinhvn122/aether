@@ -1,4 +1,5 @@
-import { proxyAvailable } from './platform';
+import { nativeFetch } from './nativeHttp';
+import { isNativeApp, proxyAvailable } from './platform';
 import { readSseData } from './sse';
 import { strings } from './strings';
 
@@ -81,21 +82,29 @@ async function request(
   const url = viaProxy ? PROXY_PATH : target;
   if (viaProxy) headers['x-aether-target'] = target;
 
+  const native = isNativeApp();
+  const requestInit = {
+    method: init.method,
+    headers,
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    signal: init.signal,
+  };
+
   let res: Response;
   try {
-    res = await fetch(url, {
-      method: init.method,
-      headers,
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      signal: init.signal,
-    });
+    // Inside the iOS app requests go through URLSession, which is not subject to CORS.
+    res = native ? await nativeFetch(url, requestInit) : await fetch(url, requestInit);
   } catch (err) {
     if (init.signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
       throw new ApiError('aborted', strings.chat.stopped);
     }
     if (!navigator.onLine) throw new ApiError('network', strings.errors.network);
+    if (native) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new ApiError('network', `${strings.errors.networkNative}${reason ? `\n${reason}` : ''}`);
+    }
     if (viaProxy) throw new ApiError('proxy', strings.errors.proxyUnavailable);
-    throw new ApiError('cors', proxyAvailable() ? strings.errors.cors : strings.errors.corsNative);
+    throw new ApiError('cors', strings.errors.cors);
   }
 
   if (!res.ok) throw await toApiError(res, viaProxy);

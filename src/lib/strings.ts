@@ -79,8 +79,7 @@ export const strings = {
     rateLimit: 'Rate limited (429). Wait a moment and try again.',
     server: 'The server returned an error',
     cors: 'The request was blocked — most likely CORS, or the server is unreachable. Turn on “Call via proxy” in Settings, or check that the server is running.',
-    corsNative:
-      'The request was blocked — the server may not allow app requests (CORS) or is unreachable. Use a provider that supports browser access (OpenAI, OpenRouter, Groq) or check the server address.',
+    networkNative: 'Could not reach the server. Check the Base URL and your internet connection.',
     network: 'Network error — you appear to be offline or the server is unreachable.',
     proxyUnavailable: 'The proxy is only available when the app is served by `npm run dev`, `npm run preview` or `npm run serve`.',
     config: 'Set a Base URL and model in Settings first.',
@@ -106,7 +105,7 @@ export const strings = {
     useProxy: 'Call via proxy',
     useProxyHint:
       'Routes requests through the Aether server to avoid browser CORS errors. Requires running via npm run dev / preview / serve.',
-    useProxyNative: 'Not available in the iOS app — requests go directly to the server.',
+    useProxyNative: 'Not needed in the iOS app — requests use native iOS networking, so CORS never applies.',
     thinkingEffort: 'Thinking effort',
     thinkingEffortHint:
       'Auto sends nothing. Low / Medium / High send reasoning_effort (OpenRouter: reasoning.effort) — only for reasoning models.',

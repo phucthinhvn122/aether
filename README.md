@@ -170,7 +170,8 @@ For TestFlight / App Store: Apple Developer Program membership, then in Xcode *P
 
 ### Notes for the native build
 
-- There is no `/api/proxy` in the app (the toggle is disabled there). OpenAI, OpenRouter and Groq allow direct app requests; servers without CORS headers won’t work. `CapacitorHttp` is intentionally off because it buffers responses and would break streaming.
+- In the app, all model requests go through a small local plugin (`ios/App/App/NativeHttpStreamPlugin.swift`, registered in `MainViewController.swift`) that uses `URLSession`, so **CORS does not apply** and any OpenAI-compatible server works. Responses are streamed chunk by chunk into a real `ReadableStream` (`src/lib/nativeHttp.ts`), so token streaming and Stop still work. The proxy toggle is disabled because it isn’t needed. (`CapacitorHttp` isn’t used because it buffers whole responses.)
+- `NSAllowsArbitraryLoads` is enabled so plain `http://` servers work; for App Store review you’ll need to justify it (user-configured AI servers) or remove it.
 - `localhost` means the phone itself. For Ollama/LM Studio use your computer’s LAN IP (e.g. `http://192.168.1.20:11434/v1`, start Ollama with `OLLAMA_HOST=0.0.0.0 OLLAMA_ORIGINS=*`). `Info.plist` allows local-network HTTP (`NSAllowsLocalNetworking`) and includes the local-network, camera and photo-library usage strings.
 - The API key is stored in the app’s IndexedDB. For a public App Store release consider moving it to the Keychain (secure-storage plugin).
 - Re-run `npm run ios:sync` after every web change.
