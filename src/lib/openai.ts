@@ -1,4 +1,4 @@
-import { nativeFetch } from './nativeHttp';
+import { nativeFetch, nativeHttpAvailable } from './nativeHttp';
 import { isNativeApp, proxyAvailable } from './platform';
 import { readSseData } from './sse';
 import { strings } from './strings';
@@ -82,7 +82,7 @@ async function request(
   const url = viaProxy ? PROXY_PATH : target;
   if (viaProxy) headers['x-aether-target'] = target;
 
-  const native = isNativeApp();
+  const native = isNativeApp() && nativeHttpAvailable();
   const requestInit = {
     method: init.method,
     headers,

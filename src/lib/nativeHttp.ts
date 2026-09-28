@@ -1,4 +1,4 @@
-import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import { uid } from './id';
 
 interface StartOptions {
@@ -19,6 +19,10 @@ interface NativeHttpStreamPlugin {
 
 /** Implemented in ios/App/App/NativeHttpStreamPlugin.swift. */
 const NativeHttpStream = registerPlugin<NativeHttpStreamPlugin>('NativeHttpStream');
+
+export function nativeHttpAvailable(): boolean {
+  return Capacitor.isPluginAvailable('NativeHttpStream');
+}
 
 const streams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
 let listening: Promise<unknown> | null = null;

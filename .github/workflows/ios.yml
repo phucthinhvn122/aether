@@ -12,7 +12,7 @@ permissions:
 jobs:
   build-ios:
     runs-on: macos-26
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -27,10 +27,13 @@ jobs:
           if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE"; fi
           xcodebuild -version
 
-      - name: Install and build web app
+      - name: Install dependencies
+        run: npm ci
+
+      # ---------- Simulator build with the native self-test enabled ----------
+      - name: Build web app (self-test) and sync
         run: |
-          npm ci
-          npm run build
+          VITE_NATIVE_SELFTEST=1 npm run build
           npx cap sync ios
 
       - name: Build for iOS Simulator
@@ -39,8 +42,45 @@ jobs:
           xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build/sim CODE_SIGNING_ALLOWED=NO build
-          cd build/sim/Build/Products/Debug-iphonesimulator
+          APP=build/sim/Build/Products/Debug-iphonesimulator/App.app
+          # Apple Silicon simulators only run signed arm64 code; ad-hoc is enough.
+          for fw in "$APP"/Frameworks/*; do codesign --force --sign - "$fw"; done
+          codesign --force --sign - "$APP"
+
+      - name: Smoke test in the simulator (native HTTP streaming)
+        run: |
+          node scripts/mock-server.mjs > "$RUNNER_TEMP/mock.log" 2>&1 &
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(d["udid"] for runtime, items in sorted(devices.items(), reverse=True) if "iOS" in runtime for d in items if d["name"].startswith("iPhone")))
+          ')
+          echo "Simulator: $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" ios/App/build/sim/Build/Products/Debug-iphonesimulator/App.app
+          LOG="$RUNNER_TEMP/app.log"
+          xcrun simctl launch --console-pty --terminate-running-process "$UDID" app.aether.chat > "$LOG" 2>&1 &
+          for i in $(seq 1 90); do
+            if grep -Eq '\[aether-selftest\] (ok|FAILED)' "$LOG"; then break; fi
+            sleep 2
+          done
+          xcrun simctl terminate "$UDID" app.aether.chat || true
+          echo "----- app log -----"; grep -E 'aether-selftest|⚡️|error|Error' "$LOG" | head -60 || true
+          echo "----- mock log -----"; cat "$RUNNER_TEMP/mock.log"
+          grep -q '\[aether-selftest\] plugin available: true' "$LOG"
+          grep -Eq '\[aether-selftest\] ok ' "$LOG"
+
+      - name: Package simulator app
+        run: |
+          cd ios/App/build/sim/Build/Products/Debug-iphonesimulator
           zip -qry "$GITHUB_WORKSPACE/Aether-simulator.zip" App.app
+
+      # ---------- Release device build (no self-test code) ----------
+      - name: Build web app (release) and sync
+        run: |
+          npm run build
+          npx cap sync ios
 
       - name: Build unsigned device IPA
         working-directory: ios/App
@@ -51,6 +91,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
           mkdir -p Payload
           cp -R build/device/Build/Products/Release-iphoneos/App.app Payload/
+          if grep -rq 'aether-selftest' Payload/App.app/public; then echo "::error::self-test code leaked into release"; exit 1; fi
           zip -qry "$GITHUB_WORKSPACE/Aether-unsigned.ipa" Payload
 
       # Optional: add repository secrets IOS_P12_BASE64, IOS_P12_PASSWORD, IOS_MOBILEPROVISION_BASE64
@@ -99,4 +140,4 @@ jobs:
           gh release create ios-latest Aether-unsigned.ipa \
             --target "$GITHUB_SHA" --prerelease \
             --title "Aether iOS — latest build" \
-            --notes "Unsigned IPA from commit ${GITHUB_SHA::7}. Sign it with your certificate (ESign, Sideloadly, Feather…) before installing."
+            --notes "Unsigned IPA from commit ${GITHUB_SHA::7} (passed the simulator streaming smoke test). Sign it with your certificate (ESign, Sideloadly, Feather…) before installing."

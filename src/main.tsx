@@ -10,6 +10,10 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
+if (import.meta.env.VITE_NATIVE_SELFTEST && isNativeApp()) {
+  void import('./lib/nativeSelfTest').then((m) => m.runNativeSelfTest());
+}
+
 if (import.meta.env.PROD && 'serviceWorker' in navigator && window.isSecureContext && !isNativeApp()) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').catch(() => undefined);
