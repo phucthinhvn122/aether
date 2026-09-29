@@ -90,4 +90,4 @@ export const AssistantMessage = memo(function AssistantMessage({
       )}
     </div>
   );
-});
+}, (a, b) => a.message === b.message && a.phase === b.phase && a.isLast === b.isLast && a.openArtifactId === b.openArtifactId);

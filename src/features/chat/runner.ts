@@ -11,7 +11,9 @@ import { runTool, stepFor, WEB_TOOLS } from './webTools';
 
 let activeController: AbortController | null = null;
 
-const PERSIST_EVERY_MS = 1000;
+const PERSIST_EVERY_MS = 4000;
+/** Markdown re-parsing every animation frame is what makes streaming stutter. */
+const FLUSH_EVERY_MS = 100;
 const IMAGE_REJECTION_KINDS = new Set(['badRequest', 'model', 'server']);
 // OpenRouter answers 404 "No endpoints found that support tool use"; others send 400/422/500.
 const TOOL_REJECTION_KINDS = new Set(['badRequest', 'model', 'server', 'notFound']);
@@ -113,6 +115,8 @@ export async function runAssistant(conversationId: string): Promise<void> {
   let reasoning = '';
   let steps: ToolStep[] = [];
   let frame = 0;
+  let flushTimer = 0;
+  let lastFlush = 0;
   let lastPersist = Date.now();
 
   const derived = () => {
@@ -125,6 +129,8 @@ export async function runAssistant(conversationId: string): Promise<void> {
   };
   const flush = () => {
     frame = 0;
+    flushTimer = 0;
+    lastFlush = Date.now();
     if (activeController !== controller) return;
     const d = derived();
     const toolsRunning = steps.some((s) => s.status === 'running');
@@ -136,7 +142,13 @@ export async function runAssistant(conversationId: string): Promise<void> {
     });
   };
   const schedule = () => {
-    if (!frame) frame = requestAnimationFrame(flush);
+    if (frame || flushTimer) return;
+    const wait = FLUSH_EVERY_MS - (Date.now() - lastFlush);
+    if (wait <= 0) frame = requestAnimationFrame(flush);
+    else flushTimer = window.setTimeout(() => {
+      flushTimer = 0;
+      frame = requestAnimationFrame(flush);
+    }, wait);
   };
 
   const consume = async (payload: ChatMessage[], withTools: boolean): Promise<ToolCall[]> => {
@@ -211,6 +223,10 @@ export async function runAssistant(conversationId: string): Promise<void> {
     }
   } finally {
     if (frame) cancelAnimationFrame(frame);
+    if (flushTimer) clearTimeout(flushTimer);
+    frame = 0;
+    flushTimer = 0;
+    flush();
   }
 
   const final = derived();

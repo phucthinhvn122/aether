@@ -1,4 +1,5 @@
 import { ApiError, fetchExternalText, type ToolCall, type ToolSpec } from '../../lib/openai';
+import { isNativeApp } from '../../lib/platform';
 import type { ToolSource, ToolStep } from '../../lib/types';
 
 const MAX_RESULTS = 6;
@@ -76,14 +77,52 @@ function parseDdgLite(html: string): SearchResult[] {
     .filter((r) => /^https?:/i.test(r.url));
 }
 
-export async function searchWeb(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
+function uniqueResults(list: SearchResult[]): SearchResult[] {
+  return list.filter((r, i) => r.title && list.findIndex((o) => o.url === r.url) === i).slice(0, MAX_RESULTS);
+}
+
+/** Works from the phone and from a dev machine. DuckDuckGo answers 403 to datacenter IPs (the hosted proxy). */
+async function searchDuckDuckGo(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
   const q = encodeURIComponent(query);
-  const unique = (list: SearchResult[]) => list.filter((r, i) => list.findIndex((o) => o.url === r.url) === i).slice(0, MAX_RESULTS);
   const html = await fetchExternalText(`https://html.duckduckgo.com/html/?q=${q}`, signal);
-  const results = unique(parseDdgHtml(html.text));
+  const results = uniqueResults(parseDdgHtml(html.text));
   if (results.length) return results;
   const lite = await fetchExternalText(`https://lite.duckduckgo.com/lite/?q=${q}`, signal);
-  return unique(parseDdgLite(lite.text));
+  return uniqueResults(parseDdgLite(lite.text));
+}
+
+function parseBingRss(xml: string): SearchResult[] {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  return Array.from(doc.querySelectorAll('item')).map((item) => ({
+    title: clean(item.querySelector('title')?.textContent),
+    url: clean(item.querySelector('link')?.textContent),
+    snippet: clean(item.querySelector('description')?.textContent),
+  })).filter((r) => /^https?:/i.test(r.url) && !/bing\.com\/(?:search|ck\/)/i.test(r.url));
+}
+
+/** Works through the hosted proxy, where DuckDuckGo refuses the request. */
+async function searchBing(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
+  const q = encodeURIComponent(query);
+  const rss = await fetchExternalText(`https://www.bing.com/search?q=${q}&format=rss&count=10`, signal);
+  return uniqueResults(parseBingRss(rss.text));
+}
+
+export async function searchWeb(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
+  // The iOS app reaches DuckDuckGo directly and that already works. The website goes through
+  // the Vercel proxy, which DuckDuckGo answers with 403, so it searches Bing first.
+  const attempts = isNativeApp() ? [searchDuckDuckGo, searchBing] : [searchBing, searchDuckDuckGo];
+  let lastError: unknown;
+  for (const attempt of attempts) {
+    try {
+      const results = await attempt(query, signal);
+      if (results.length) return results;
+    } catch (err) {
+      if (signal?.aborted || (err instanceof ApiError && err.kind === 'aborted')) throw err;
+      lastError = err;
+    }
+  }
+  if (lastError) throw lastError;
+  return [];
 }
 
 const BLOCK = 'p,div,section,article,li,tr,h1,h2,h3,h4,h5,h6,pre,blockquote,br,dt,dd,figcaption,header,footer';

@@ -1,13 +1,19 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef } from 'react';
 import { db, getConversationMessages } from '../../lib/db';
-import type { Message } from '../../lib/types';
+import type { Message, ToolStep } from '../../lib/types';
 import { artifactStore, closeArtifact, openArtifact } from '../artifacts/artifactStore';
 import { parseSegmentsCached } from '../artifacts/parse';
 import { useArtifactIndex } from '../artifacts/useArtifacts';
 import { streamStore } from './streamStore';
 
 const NO_MESSAGES: Message[] = [];
+
+function sameSteps(a?: ToolStep[], b?: ToolStep[]): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return !a?.length && !b?.length;
+  return a.every((s, i) => s.id === b[i].id && s.status === b[i].status && (s.sources?.length ?? 0) === (b[i].sources?.length ?? 0));
+}
 
 /** Loads a conversation and overlays the in-flight streamed tokens on top of the stored messages. */
 export function useConversationView(conversationId: string | undefined) {
@@ -26,15 +32,33 @@ export function useConversationView(conversationId: string | undefined) {
   );
 
   const liveHere = stream.conversationId === conversationId && stream.messageId !== null;
+  const shown = useRef<Message[]>(NO_MESSAGES);
 
   const messages = useMemo(() => {
     const list = stored ?? NO_MESSAGES;
-    if (!liveHere) return list;
-    return list.map((m) =>
-      m.id === stream.messageId
-        ? { ...m, content: stream.content, thinking: stream.thinking || undefined, steps: stream.steps.length ? stream.steps : m.steps }
-        : m,
-    );
+    const prev = new Map(shown.current.map((m) => [m.id, m]));
+    const next = list.map((m) => {
+      const overlay = liveHere && m.id === stream.messageId;
+      const content = overlay ? stream.content : m.content;
+      const thinking = overlay ? stream.thinking || undefined : m.thinking;
+      const steps = overlay && stream.steps.length ? stream.steps : m.steps;
+      const old = prev.get(m.id);
+      // Dexie hands out fresh objects on every write. Reusing the previous object keeps the
+      // rest of the transcript from re-parsing markdown while one message is streaming.
+      if (
+        old &&
+        old.role === m.role &&
+        old.content === content &&
+        old.thinking === thinking &&
+        old.error === m.error &&
+        sameSteps(old.steps, steps)
+      ) {
+        return old;
+      }
+      return { ...m, content, thinking, steps };
+    });
+    shown.current = next;
+    return next;
   }, [stored, liveHere, stream.messageId, stream.content, stream.thinking, stream.steps]);
 
   const artifacts = useArtifactIndex(messages);

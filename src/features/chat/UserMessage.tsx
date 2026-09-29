@@ -1,5 +1,5 @@
 import { Pencil } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Button } from '../../components/Button';
 import { CopyButton } from '../../components/CopyButton';
 import { IconButton } from '../../components/IconButton';
@@ -13,7 +13,7 @@ interface UserMessageProps {
   onEdit: (content: string) => void;
 }
 
-export function UserMessage({ message, canEdit, onEdit }: UserMessageProps) {
+export const UserMessage = memo(function UserMessage({ message, canEdit, onEdit }: UserMessageProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -101,4 +101,4 @@ export function UserMessage({ message, canEdit, onEdit }: UserMessageProps) {
       </div>
     </div>
   );
-}
+}, (a, b) => a.message === b.message && a.canEdit === b.canEdit);

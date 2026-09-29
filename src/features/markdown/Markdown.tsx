@@ -1,4 +1,4 @@
-import { Children, isValidElement, memo, type ReactElement, type ReactNode } from 'react';
+import { Children, createContext, isValidElement, memo, useContext, type ReactElement, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '../../lib/cn';
@@ -11,13 +11,16 @@ function textOf(node: ReactNode): string {
   return '';
 }
 
+const StreamingMarkdown = createContext(false);
+
 const components: Components = {
   pre({ children }) {
+    const streaming = useContext(StreamingMarkdown);
     const child = Children.toArray(children)[0];
     if (isValidElement(child)) {
       const el = child as ReactElement<{ className?: string; children?: ReactNode }>;
       const language = /language-([\w+#.-]+)/.exec(el.props.className ?? '')?.[1];
-      return <CodeBlock code={textOf(el.props.children).replace(/\n$/, '')} language={language} />;
+      return <CodeBlock code={textOf(el.props.children).replace(/\n$/, '')} language={language} streaming={streaming} />;
     }
     return <pre>{children}</pre>;
   },
@@ -40,10 +43,12 @@ interface MarkdownProps {
 
 export const Markdown = memo(function Markdown({ content, className, streaming }: MarkdownProps) {
   return (
-    <div className={cn('prose-aether', streaming && 'streaming-caret-host', className)}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
-        {content}
-      </ReactMarkdown>
-    </div>
+    <StreamingMarkdown.Provider value={streaming ?? false}>
+      <div className={cn('prose-aether', streaming && 'streaming-caret-host', className)}>
+        <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
+          {content}
+        </ReactMarkdown>
+      </div>
+    </StreamingMarkdown.Provider>
   );
 });

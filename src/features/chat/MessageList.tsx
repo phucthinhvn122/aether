@@ -17,7 +17,7 @@ interface MessageListProps {
 export function MessageList({ messages, streamingId, phase, artifacts, openArtifactId, onRegenerate, onEdit }: MessageListProps) {
   const busy = streamingId !== null;
   return (
-    <ol className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 sm:px-6" aria-live="polite" aria-busy={busy}>
+    <ol className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 sm:px-6" aria-busy={busy}>
       {messages.map((m, i) => (
         <li key={m.id}>
           {m.role === 'user' ? (
