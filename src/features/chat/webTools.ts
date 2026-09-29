@@ -1,5 +1,4 @@
 import { ApiError, fetchExternalText, type ToolCall, type ToolSpec } from '../../lib/openai';
-import { isNativeApp } from '../../lib/platform';
 import type { ToolSource, ToolStep } from '../../lib/types';
 
 const MAX_RESULTS = 6;
@@ -107,20 +106,63 @@ async function searchBing(query: string, signal?: AbortSignal): Promise<SearchRe
   return uniqueResults(parseBingRss(rss.text));
 }
 
+const VIETNAMESE = /[ăâêôơưđàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]/i;
+
+function googleNewsUrl(query: string, edition: 'vi' | 'en'): string {
+  const q = encodeURIComponent(query);
+  // hl=en (without the region) 302s; en-US and vi answer directly.
+  return edition === 'vi'
+    ? `https://news.google.com/rss/search?q=${q}&hl=vi&gl=VN&ceid=VN:vi`
+    : `https://news.google.com/rss/search?q=${q}&hl=en-US&gl=US&ceid=US:en`;
+}
+
+function parseGoogleNews(xml: string): SearchResult[] {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  return Array.from(doc.querySelectorAll('item')).flatMap((item) => {
+    const title = clean(item.querySelector('title')?.textContent);
+    const url = clean(item.querySelector('link')?.textContent);
+    const source = clean(item.querySelector('source')?.textContent);
+    const when = clean(item.querySelector('pubDate')?.textContent).replace(/^\w+,\s*/, '').replace(/\s+\d{2}:\d{2}:\d{2}\s+GMT$/, '');
+    if (!title || !/^https?:/i.test(url)) return [];
+    return [{ title, url, snippet: [source, when].filter(Boolean).join(' · ') }];
+  });
+}
+
+/** Google's web page needs JavaScript, so this uses the Google News RSS feed, which returns real items. */
+async function searchGoogle(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
+  const editions: Array<'vi' | 'en'> = VIETNAMESE.test(query) ? ['vi', 'en'] : ['en', 'vi'];
+  const out: SearchResult[] = [];
+  for (const edition of editions) {
+    const rss = await fetchExternalText(googleNewsUrl(query, edition), signal);
+    for (const result of parseGoogleNews(rss.text)) {
+      if (out.some((r) => r.url === result.url)) continue;
+      out.push(result);
+      if (out.length >= MAX_RESULTS) return out;
+    }
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
 export async function searchWeb(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
-  // The iOS app reaches DuckDuckGo directly and that already works. The website goes through
-  // the Vercel proxy, which DuckDuckGo answers with 403, so it searches Bing first.
-  const attempts = isNativeApp() ? [searchDuckDuckGo, searchBing] : [searchBing, searchDuckDuckGo];
+  // Google News first. DuckDuckGo is next (it 403s the hosted proxy). Bing only fills a gap.
+  const attempts = [searchGoogle, searchDuckDuckGo, searchBing];
+  const merged: SearchResult[] = [];
   let lastError: unknown;
   for (const attempt of attempts) {
     try {
-      const results = await attempt(query, signal);
-      if (results.length) return results;
+      for (const result of await attempt(query, signal)) {
+        if (merged.some((r) => r.url === result.url)) continue;
+        merged.push(result);
+        if (merged.length >= MAX_RESULTS) return merged;
+      }
+      if (merged.length >= 3) break;
     } catch (err) {
       if (signal?.aborted || (err instanceof ApiError && err.kind === 'aborted')) throw err;
       lastError = err;
     }
   }
+  if (merged.length) return merged;
   if (lastError) throw lastError;
   return [];
 }

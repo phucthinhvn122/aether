@@ -54,28 +54,50 @@ async function relay(request: Request): Promise<Response> {
     if (value) headers.set(name, value);
   }
 
-  let upstream: Response;
-  try {
-    upstream = await fetch(target, {
-      method: request.method,
-      headers,
-      body: request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer(),
-      signal: request.signal,
-      redirect: 'manual',
-    });
-  } catch (err) {
-    const reason = err instanceof Error ? ((err.cause as { code?: string } | undefined)?.code ?? err.message) : String(err);
-    return json(502, `Proxy could not reach ${target.origin} (${reason}).`);
-  }
+  let current = target;
+  let method = request.method;
+  let body: ArrayBuffer | undefined = method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer();
 
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers: {
-      'content-type': upstream.headers.get('content-type') ?? 'application/octet-stream',
-      'cache-control': 'no-cache, no-transform',
-      'x-accel-buffering': 'no',
-    },
-  });
+  for (let hop = 0; hop < 4; hop++) {
+    let upstream: Response;
+    try {
+      upstream = await fetch(current, { method, headers, body, signal: request.signal, redirect: 'manual' });
+    } catch (err) {
+      const reason = err instanceof Error ? ((err.cause as { code?: string } | undefined)?.code ?? err.message) : String(err);
+      return json(502, `Proxy could not reach ${current.origin} (${reason}).`);
+    }
+
+    if (upstream.status !== 301 && upstream.status !== 302 && upstream.status !== 303 && upstream.status !== 307 && upstream.status !== 308) {
+      return new Response(upstream.body, {
+        status: upstream.status,
+        headers: {
+          'content-type': upstream.headers.get('content-type') ?? 'application/octet-stream',
+          'cache-control': 'no-cache, no-transform',
+          'x-accel-buffering': 'no',
+        },
+      });
+    }
+
+    const next = upstream.headers.get('location');
+    await upstream.body?.cancel();
+    if (!next) return json(502, `Redirect from ${current.host} had no Location header.`);
+    let nextUrl: URL;
+    try {
+      nextUrl = new URL(next, current);
+    } catch {
+      return json(502, `Redirect from ${current.host} was not a valid URL.`);
+    }
+    if (nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') return json(400, 'Only http(s) targets are allowed.');
+    if (isPrivateHost(nextUrl.hostname)) return json(403, 'The hosted proxy cannot follow a redirect to a private network.');
+    if (!allowedByEnv(nextUrl.hostname)) return json(403, `Host ${nextUrl.hostname} is not in PROXY_ALLOWED_HOSTS.`);
+    // 301/302/303 become GET. 307/308 keep the method and body.
+    if (upstream.status !== 307 && upstream.status !== 308) {
+      method = 'GET';
+      body = undefined;
+    }
+    current = nextUrl;
+  }
+  return json(502, 'Too many redirects.');
 }
 
 export function GET(request: Request): Promise<Response> {

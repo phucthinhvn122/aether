@@ -113,7 +113,7 @@ export const strings = {
     visionHint: 'Attach images as image_url parts (vision models). Falls back to text automatically if rejected.',
     webSearch: 'Web search',
     webSearchHint:
-      'Lets the model call web_search / fetch_url (DuckDuckGo, no key needed). Needs a model with tool calling; others are asked again without tools automatically.',
+      'Lets the model call web_search / fetch_url. Results come from Google News (no key). Needs a model with tool calling; others are asked again without tools automatically.',
     instructions: 'Custom instructions',
     instructionsHint: 'Applied to every conversation. Project instructions are added on top.',
     instructionsPlaceholder: 'e.g. Be concise. I prefer TypeScript examples.',
